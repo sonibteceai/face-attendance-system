@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Sensitive data — DO NOT commit real student data
+database/*.db
+data/student_faces/*.jpg
+data/student_faces/*.png
+models/*.pkl
+
+# Keep folder structure but ignore contents
+!database/.gitkeep
+!data/student_faces/.gitkeep
+!models/.gitkeep
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
