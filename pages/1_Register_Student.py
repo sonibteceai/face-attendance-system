@@ -10,7 +10,7 @@ import av
 from insightface.app import FaceAnalysis
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from db import get_connection
-from train_classifier import train_and_save
+from train_classifier import train_and_save  # now persists model to Turso, not just local disk
 
 st.set_page_config(page_title="Register Student")
 
@@ -170,9 +170,109 @@ if st.session_state.just_registered:
     if st.button("🔁 Retrain Model Now"):
         with st.spinner("Retraining classifier on all registered students..."):
             try:
-                train_and_save()
-                st.cache_resource.clear()  # so Mark Attendance page reloads the new model
-                st.success("✅ Model retrained successfully.")
-                st.session_state.just_registered = False
+                trained = train_and_save()
+                if trained:
+                    st.cache_resource.clear()  # so Mark Attendance page reloads the new model
+                    st.success("✅ Model retrained and saved to the database.")
+                    st.session_state.just_registered = False
+                else:
+                    st.error("❌ Need at least 2 registered students with samples to train.")
             except Exception as e:
                 st.error(f"❌ Retraining failed: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 🗑️ Manage / Remove Students
+# ─────────────────────────────────────────────────────────────
+st.divider()
+st.header("🗑️ Manage Students")
+
+
+def get_all_students():
+    conn = get_connection()
+    conn.sync()
+    cursor = conn.cursor()
+    cursor.execute("SELECT student_id, name, photo_path FROM student_profiles ORDER BY name")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows  # list of (student_id, name, photo_path)
+
+
+def delete_student(student_id, photo_path):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance WHERE student_id = ?", (student_id,))
+    cursor.execute("DELETE FROM face_embeddings WHERE student_id = ?", (student_id,))
+    cursor.execute("DELETE FROM student_profiles WHERE student_id = ?", (student_id,))
+    conn.commit()
+    conn.sync()
+    conn.close()
+
+    if photo_path and os.path.exists(photo_path):
+        try:
+            os.remove(photo_path)
+        except Exception:
+            pass  # non-fatal — DB records are already gone
+
+
+def delete_all_data():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance")
+    cursor.execute("DELETE FROM face_embeddings")
+    cursor.execute("DELETE FROM student_profiles")
+    cursor.execute("DELETE FROM model_store")
+    conn.commit()
+    conn.sync()
+    conn.close()
+
+    # Best-effort cleanup of saved photos and local model cache
+    try:
+        for fname in os.listdir(PHOTO_DIR):
+            fpath = os.path.join(PHOTO_DIR, fname)
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+    except Exception:
+        pass
+    try:
+        local_model_path = os.path.join(os.path.dirname(__file__), "..", "models", "classifier.pkl")
+        if os.path.exists(local_model_path):
+            os.remove(local_model_path)
+    except Exception:
+        pass
+
+
+students = get_all_students()
+
+if not students:
+    st.caption("No students registered yet.")
+else:
+    st.subheader("Remove a single student")
+    options = {f"{name} ({sid})": (sid, name, photo_path) for sid, name, photo_path in students}
+    selected_label = st.selectbox("Select a student to remove", list(options.keys()))
+    selected_sid, selected_name, selected_photo = options[selected_label]
+
+    confirm_single = st.checkbox(
+        f"I understand this will permanently delete **{selected_name}**'s profile, "
+        f"face samples, and attendance history."
+    )
+    if st.button("🗑️ Delete Selected Student", disabled=not confirm_single):
+        with st.spinner(f"Deleting {selected_name}..."):
+            delete_student(selected_sid, selected_photo)
+        st.success(f"✅ {selected_name} ({selected_sid}) has been removed.")
+        st.info("Remember to retrain the model so it forgets this student too.")
+        st.rerun()
+
+st.divider()
+st.subheader("⚠️ Danger zone: remove all data")
+st.caption("This permanently deletes every student, face sample, attendance record, and the trained model.")
+
+danger_confirm_text = st.text_input(
+    "Type DELETE ALL to confirm you want to wipe everything", value="", key="danger_confirm"
+)
+if st.button("🧨 Delete ALL Students & Data", disabled=danger_confirm_text.strip() != "DELETE ALL"):
+    with st.spinner("Deleting all data..."):
+        delete_all_data()
+        st.cache_resource.clear()
+    st.success("✅ All student data, attendance records, and the trained model have been removed.")
+    st.rerun()
