@@ -53,6 +53,16 @@ def init_db():
             FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
         )
     """)
+    # Holds the trained classifier (pickled bytes) so it survives app restarts
+    # even on ephemeral hosting like Streamlit Community Cloud.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS model_store (
+            id INTEGER PRIMARY KEY,
+            model_blob BLOB NOT NULL,
+            model_type TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.sync()
