@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-
+import pandas as pd  # make sure this is imported at the top of the file
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -236,7 +236,14 @@ with report_tab2:
 
     photo_col, metric_col = st.columns([1, 3])
     with photo_col:
-        if photo_path and os.path.exists(photo_path):
+        has_photo = (
+                photo_path is not None
+                and not (isinstance(photo_path, float) and pd.isna(photo_path))
+                and isinstance(photo_path, str)
+                and photo_path.strip() != ""
+                and os.path.exists(photo_path)
+        )
+        if has_photo:
             st.image(photo_path, caption=selected_student, width=150)
         else:
             st.info("No photo on file")
