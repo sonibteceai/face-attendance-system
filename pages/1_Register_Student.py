@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import threading
 import av
+import re
 from insightface.app import FaceAnalysis
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from db import get_connection
@@ -26,6 +27,8 @@ POSE_PROMPTS = [
     "Tilt your head slightly DOWN",
 ]
 
+ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
 
 @st.cache_resource
 def load_face_app():
@@ -35,6 +38,34 @@ def load_face_app():
 
 
 face_app = load_face_app()
+
+
+# -------------------------------
+# ID suggestion + duplicate check
+# -------------------------------
+def get_existing_student_ids():
+    conn = get_connection()
+    conn.sync()
+    cursor = conn.cursor()
+    cursor.execute("SELECT student_id FROM student_profiles")
+    rows = cursor.fetchall()
+    conn.close()
+    return {r[0] for r in rows}
+
+
+def suggest_next_id(existing_ids):
+    numeric_ids = []
+    for sid in existing_ids:
+        if sid.isdigit():
+            numeric_ids.append(int(sid))
+    next_id = (max(numeric_ids) + 1) if numeric_ids else 1
+    return str(next_id)
+
+
+existing_ids = get_existing_student_ids()
+
+if "suggested_id" not in st.session_state:
+    st.session_state.suggested_id = suggest_next_id(existing_ids)
 
 
 class RegisterProcessor(VideoProcessorBase):
@@ -75,8 +106,29 @@ class RegisterProcessor(VideoProcessorBase):
 st.title("📸 Register New Student")
 
 col1, col2 = st.columns(2)
-student_id = col1.text_input("Student ID")
-name = col2.text_input("Student Name")
+student_id_raw = col1.text_input(
+    "Student ID",
+    value=st.session_state.suggested_id,
+    help="Auto-suggested — feel free to change it to whatever ID scheme you use.",
+)
+name_raw = col2.text_input("Student Name")
+
+# ---- Clean + validate inputs ----
+student_id = student_id_raw.strip()
+name = name_raw.strip()
+
+validation_error = None
+if not student_id or not name:
+    validation_error = "Enter both Student ID and Student Name to continue."
+elif not ID_PATTERN.match(student_id):
+    validation_error = "Student ID can only contain letters, numbers, hyphens, and underscores."
+elif not any(c.isalpha() for c in name):
+    validation_error = "Student Name must contain at least one letter."
+elif student_id in existing_ids:
+    validation_error = f"Student ID '{student_id}' is already taken. Choose a different one."
+
+if validation_error:
+    st.warning(f"⚠️ {validation_error}")
 
 if "samples" not in st.session_state:
     st.session_state.samples = []
@@ -110,14 +162,16 @@ else:
 
 capture_col, reset_col = st.columns(2)
 
-if capture_col.button("📷 Capture Sample", disabled=sample_count >= NUM_SAMPLES):
+capture_disabled = sample_count >= NUM_SAMPLES or validation_error is not None
+
+if capture_col.button("📷 Capture Sample", disabled=capture_disabled):
     if ctx.video_processor:
         with ctx.video_processor.lock:
             embedding = ctx.video_processor.latest_embedding
             frame = ctx.video_processor.latest_frame
         if embedding is not None:
             st.session_state.samples.append(embedding)
-            if st.session_state.profile_photo_path is None and student_id:
+            if st.session_state.profile_photo_path is None:
                 path = os.path.join(PHOTO_DIR, f"{student_id}.jpg")
                 cv2.imwrite(path, frame)
                 st.session_state.profile_photo_path = path
@@ -135,33 +189,42 @@ if reset_col.button("🔄 Reset Samples"):
 
 st.divider()
 
-save_disabled = sample_count < NUM_SAMPLES or not student_id or not name
+save_disabled = sample_count < NUM_SAMPLES or validation_error is not None
+
 if st.button("💾 Save Registration", disabled=save_disabled):
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO student_profiles (student_id, name, photo_path) VALUES (?, ?, ?)",
-            (student_id, name, st.session_state.profile_photo_path),
-        )
-        for emb in st.session_state.samples:
+    # Re-check duplicates right before saving too, in case someone else
+    # registered the same ID in another session moments ago
+    fresh_ids = get_existing_student_ids()
+    if student_id in fresh_ids:
+        st.error(f"❌ Student ID '{student_id}' was just taken by someone else. Pick a different ID.")
+    else:
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
             cursor.execute(
-                "INSERT INTO face_embeddings (student_id, embedding) VALUES (?, ?)",
-                (student_id, emb.astype(np.float32).tobytes()),
+                "INSERT INTO student_profiles (student_id, name, photo_path) VALUES (?, ?, ?)",
+                (student_id, name, st.session_state.profile_photo_path),
             )
-        conn.commit()
-        conn.sync()
-        st.success(f"✅ {name} registered successfully with {len(st.session_state.samples)} samples.")
-        st.session_state.samples = []
-        st.session_state.profile_photo_path = None
-        st.session_state.just_registered = True
-    except Exception as e:
-        if "constraint" in str(e).lower():
-            st.error(f"❌ Student ID '{student_id}' already exists.")
-        else:
-            st.error(f"❌ Registration failed: {e}")
-    finally:
-        conn.close()
+            for emb in st.session_state.samples:
+                cursor.execute(
+                    "INSERT INTO face_embeddings (student_id, embedding) VALUES (?, ?)",
+                    (student_id, emb.astype(np.float32).tobytes()),
+                )
+            conn.commit()
+            conn.sync()
+            st.success(f"✅ {name} registered successfully with {len(st.session_state.samples)} samples.")
+            st.session_state.samples = []
+            st.session_state.profile_photo_path = None
+            st.session_state.just_registered = True
+            # Refresh the suggested next ID for whoever registers next
+            st.session_state.suggested_id = suggest_next_id(fresh_ids | {student_id})
+        except Exception as e:
+            if "constraint" in str(e).lower() or "unique" in str(e).lower():
+                st.error(f"❌ Student ID '{student_id}' already exists.")
+            else:
+                st.error(f"❌ Registration failed: {e}")
+        finally:
+            conn.close()
 
 # Show retrain option right after a successful registration
 if st.session_state.just_registered:
@@ -261,6 +324,7 @@ else:
             delete_student(selected_sid, selected_photo)
         st.success(f"✅ {selected_name} ({selected_sid}) has been removed.")
         st.info("Remember to retrain the model so it forgets this student too.")
+        st.session_state.suggested_id = suggest_next_id(get_existing_student_ids())
         st.rerun()
 
 st.divider()
@@ -275,4 +339,5 @@ if st.button("🧨 Delete ALL Students & Data", disabled=danger_confirm_text.str
         delete_all_data()
         st.cache_resource.clear()
     st.success("✅ All student data, attendance records, and the trained model have been removed.")
+    st.session_state.suggested_id = "1"
     st.rerun()
