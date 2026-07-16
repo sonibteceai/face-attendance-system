@@ -9,13 +9,17 @@ import threading
 import av
 from insightface.app import FaceAnalysis
 from sklearn.metrics.pairwise import cosine_distances
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 from db import get_connection
 from train_classifier import train_and_save, load_model_from_db
 
 st.set_page_config(page_title="Mark Attendance")
 
 DISTANCE_THRESHOLD = 0.4
+
+RTC_CONFIGURATION = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
 
 
 @st.cache_resource
@@ -111,6 +115,7 @@ class AttendanceProcessor(VideoProcessorBase):
     def __init__(self):
         self.lock = threading.Lock()
         self.marked_today = set()
+        self.marked_today_names = set()
         self.last_marked_name = None
 
     def recv(self, frame):
@@ -142,6 +147,7 @@ class AttendanceProcessor(VideoProcessorBase):
                             self.last_marked_name = student_name
                     with self.lock:
                         self.marked_today.add(pred_id)
+                        self.marked_today_names.add(student_name)
             else:
                 label = f"Unknown ({similarity:.2f})"
                 color = (0, 0, 255)
@@ -160,6 +166,7 @@ with center_col:
     ctx = webrtc_streamer(
         key="attendance",
         video_processor_factory=AttendanceProcessor,
+        rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
             "audio": False,
@@ -173,6 +180,6 @@ with center_col:
 
 if ctx.video_processor:
     with ctx.video_processor.lock:
-        marked_names = list(ctx.video_processor.marked_today)
+        marked_names = list(ctx.video_processor.marked_today_names)
     if marked_names:
-        st.success(f"Marked today (this session): {', '.join(str(m) for m in marked_names)}")
+        st.success(f"Marked today (this session): {', '.join(marked_names)}")

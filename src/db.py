@@ -4,16 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
-
-print("Loaded URL:", os.getenv("TURSO_DATABASE_URL"))
-print("Loaded Token:", os.getenv("TURSO_AUTH_TOKEN"))
-
 TURSO_DATABASE_URL = os.environ["TURSO_DATABASE_URL"]
 TURSO_AUTH_TOKEN = os.environ["TURSO_AUTH_TOKEN"]
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "database", "attendance.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
 
 def get_connection():
     return libsql.connect(
@@ -21,6 +17,7 @@ def get_connection():
         sync_url=TURSO_DATABASE_URL,
         auth_token=TURSO_AUTH_TOKEN,
     )
+
 
 def init_db():
     conn = get_connection()
@@ -64,10 +61,20 @@ def init_db():
         )
     """)
 
+    # ---- Migration: add photo_data BLOB column if it doesn't exist yet ----
+    # Local disk (photo_path) is wiped on every Streamlit Cloud restart, so the
+    # actual JPEG bytes need to live in Turso alongside everything else.
+    cursor.execute("PRAGMA table_info(student_profiles)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if "photo_data" not in existing_columns:
+        cursor.execute("ALTER TABLE student_profiles ADD COLUMN photo_data BLOB")
+        print("Migration: added photo_data column to student_profiles")
+
     conn.commit()
     conn.sync()
     conn.close()
     print("Database initialized (Turso):", TURSO_DATABASE_URL)
+
 
 if __name__ == "__main__":
     init_db()

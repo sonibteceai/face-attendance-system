@@ -9,11 +9,15 @@ import threading
 import av
 import re
 from insightface.app import FaceAnalysis
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 from db import get_connection
 from train_classifier import train_and_save  # now persists model to Turso, not just local disk
 
 st.set_page_config(page_title="Register Student")
+
+RTC_CONFIGURATION = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
 
 PHOTO_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "student_faces")
 os.makedirs(PHOTO_DIR, exist_ok=True)
@@ -134,6 +138,8 @@ if "samples" not in st.session_state:
     st.session_state.samples = []
 if "profile_photo_path" not in st.session_state:
     st.session_state.profile_photo_path = None
+if "profile_photo_bytes" not in st.session_state:
+    st.session_state.profile_photo_bytes = None
 if "just_registered" not in st.session_state:
     st.session_state.just_registered = False
 
@@ -142,6 +148,7 @@ with center_col:
     ctx = webrtc_streamer(
         key="register",
         video_processor_factory=RegisterProcessor,
+        rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
             "audio": False,
@@ -172,9 +179,14 @@ if capture_col.button("📷 Capture Sample", disabled=capture_disabled):
         if embedding is not None:
             st.session_state.samples.append(embedding)
             if st.session_state.profile_photo_path is None:
+                # Save locally as a working cache for this session...
                 path = os.path.join(PHOTO_DIR, f"{student_id}.jpg")
                 cv2.imwrite(path, frame)
                 st.session_state.profile_photo_path = path
+                # ...but ALSO encode as JPEG bytes to persist in Turso,
+                # since local disk is wiped on every Streamlit Cloud restart
+                success, buffer = cv2.imencode(".jpg", frame)
+                st.session_state.profile_photo_bytes = buffer.tobytes() if success else None
             st.success(f"Captured {len(st.session_state.samples)}/{NUM_SAMPLES}")
             st.rerun()
         else:
@@ -202,8 +214,8 @@ if st.button("💾 Save Registration", disabled=save_disabled):
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO student_profiles (student_id, name, photo_path) VALUES (?, ?, ?)",
-                (student_id, name, st.session_state.profile_photo_path),
+                "INSERT INTO student_profiles (student_id, name, photo_path, photo_data) VALUES (?, ?, ?, ?)",
+                (student_id, name, st.session_state.profile_photo_path, st.session_state.profile_photo_bytes),
             )
             for emb in st.session_state.samples:
                 cursor.execute(
@@ -215,6 +227,7 @@ if st.button("💾 Save Registration", disabled=save_disabled):
             st.success(f"✅ {name} registered successfully with {len(st.session_state.samples)} samples.")
             st.session_state.samples = []
             st.session_state.profile_photo_path = None
+            st.session_state.profile_photo_bytes = None
             st.session_state.just_registered = True
             # Refresh the suggested next ID for whoever registers next
             st.session_state.suggested_id = suggest_next_id(fresh_ids | {student_id})

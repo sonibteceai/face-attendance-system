@@ -34,7 +34,7 @@ def load_data():
     )
     students_df = read_sql_df(
         conn,
-        "SELECT student_id, name, photo_path, registered_on FROM student_profiles"
+        "SELECT student_id, name, photo_path, photo_data, registered_on FROM student_profiles"
     )
     conn.close()
 
@@ -61,9 +61,31 @@ st.title("📋 Attendance Dashboard")
 
 attendance_df, students_df = load_data()
 
+# -------------------------------
+# Registered students — always shown, even before any attendance exists
+# -------------------------------
+st.subheader("Registered Students")
+st.metric("Total Registered Students", len(students_df))
+
+if not students_df.empty:
+    with st.expander("View registered students"):
+        cols = st.columns(5)
+        for i, row in students_df.reset_index(drop=True).iterrows():
+            with cols[i % 5]:
+                photo_data = row.get("photo_data")
+                if photo_data is not None:
+                    st.image(bytes(photo_data), caption=row["name"], use_container_width=True)
+                else:
+                    st.write(f"**{row['name']}**")
+                    st.caption("No photo")
+                st.caption(f"ID: {row['student_id']}")
+
 if attendance_df.empty:
-    st.warning("No attendance records yet. Run mark_attendance.py to start logging.")
+    st.info("No attendance has been marked yet. Go to 'Mark Attendance' to start logging, "
+            "then charts and reports will appear here.")
     st.stop()
+
+st.divider()
 
 # -------------------------------
 # Sidebar filters
@@ -221,7 +243,7 @@ with report_tab2:
 
     student_row = students_df[students_df["name"] == selected_student].iloc[0]
     student_id = student_row["student_id"]
-    photo_path = student_row.get("photo_path")
+    photo_data = student_row.get("photo_data")
 
     student_history = attendance_df[attendance_df["student_id"] == student_id][
         ["date_display", "time", "status"]
@@ -236,15 +258,8 @@ with report_tab2:
 
     photo_col, metric_col = st.columns([1, 3])
     with photo_col:
-        has_photo = (
-                photo_path is not None
-                and not (isinstance(photo_path, float) and pd.isna(photo_path))
-                and isinstance(photo_path, str)
-                and photo_path.strip() != ""
-                and os.path.exists(photo_path)
-        )
-        if has_photo:
-            st.image(photo_path, caption=selected_student, width=150)
+        if photo_data is not None:
+            st.image(bytes(photo_data), caption=selected_student, width=150)
         else:
             st.info("No photo on file")
     with metric_col:
