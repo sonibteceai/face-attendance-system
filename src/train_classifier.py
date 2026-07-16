@@ -5,10 +5,6 @@ from collections import Counter
 
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
 from db import get_connection
@@ -94,67 +90,24 @@ def train_and_save():
 
     print(f"Training on {len(X)} samples, {n_classes} students, using {cv_folds}-fold CV\n")
 
-    # ---- Define candidate models + their search grids ----
-    candidates = {
-        "KNN": {
-            "pipeline": Pipeline([("clf", KNeighborsClassifier())]),
-            "params": {
-                "clf__n_neighbors": [1, 3, 5],
-                "clf__metric": ["cosine", "euclidean"],
-                "clf__weights": ["uniform", "distance"],
-            },
-        },
-        "SVM_Linear": {
-            "pipeline": Pipeline([("scaler", StandardScaler()), ("clf", SVC(kernel="linear", probability=True))]),
-            "params": {
-                "clf__C": [0.1, 1, 10],
-            },
-        },
-        "SVM_RBF": {
-            "pipeline": Pipeline([("scaler", StandardScaler()), ("clf", SVC(kernel="rbf", probability=True))]),
-            "params": {
-                "clf__C": [0.1, 1, 10],
-                "clf__gamma": ["scale", "auto"],
-            },
-        },
-        "LogisticRegression": {
-            "pipeline": Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=2000))]),
-            "params": {
-                "clf__C": [0.1, 1, 10],
-            },
-        },
-        "RandomForest": {
-            "pipeline": Pipeline([("clf", RandomForestClassifier(random_state=42))]),
-            "params": {
-                "clf__n_estimators": [100, 200],
-                "clf__max_depth": [None, 10],
-            },
-        },
+    # ---- KNN with cosine distance only (lightweight: no multi-model comparison) ----
+    pipeline = Pipeline([("clf", KNeighborsClassifier(metric="cosine"))])
+    params = {
+        "clf__n_neighbors": [1, 3, 5, 7],
+        "clf__weights": ["uniform", "distance"],
     }
 
-    best_overall = None
-    best_score = -1
-    best_name = None
-    results = []
+    search = GridSearchCV(
+        pipeline, params,
+        cv=cv, scoring="accuracy", n_jobs=1
+    )
+    search.fit(X, y)
 
-    for name, cfg in candidates.items():
-        try:
-            search = GridSearchCV(
-                cfg["pipeline"], cfg["params"],
-                cv=cv, scoring="accuracy", n_jobs=-1
-            )
-            search.fit(X, y)
-            results.append((name, search.best_score_, search.best_params_))
-            print(f"{name:20s} best CV accuracy: {search.best_score_:.4f}  params: {search.best_params_}")
+    best_overall = search.best_estimator_
+    best_score = search.best_score_
+    best_name = "KNN_cosine"
 
-            if search.best_score_ > best_score:
-                best_score = search.best_score_
-                best_overall = search.best_estimator_
-                best_name = name
-
-        except Exception as e:
-            print(f"{name:20s} skipped due to error: {e}")
-
+    print(f"{best_name:20s} best CV accuracy: {best_score:.4f}  params: {search.best_params_}")
     print(f"\n🏆 Best model: {best_name} (CV accuracy: {best_score:.4f})")
 
     # ---- Save best model: Turso (persistent, source of truth) ----
