@@ -7,7 +7,7 @@ __pycache__/
 *.pyc
 
 # Sensitive data — DO NOT commit real student data
-database/*.db
+database/*.db*
 data/student_faces/*.jpg
 data/student_faces/*.png
 models/*.pkl
@@ -23,3 +23,6 @@ models/*.pkl
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets
+.env

@@ -1,62 +1,40 @@
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
+
 import streamlit as st
 import pandas as pd
-import sqlite3
-import os
 import plotly.express as px
 from datetime import date
-
-DB_PATH = os.path.join(os.path.dirname(__file__), "database", "attendance.db")
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS student_profiles (
-            student_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            photo_path TEXT,
-            registered_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS face_embeddings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT NOT NULL,
-            embedding BLOB NOT NULL,
-            FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS attendance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'Present',
-            FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
-        )
-    """)
-    conn.commit()
-    conn.close()
-
+from db import get_connection, init_db
 
 init_db()
 
 st.set_page_config(page_title="Attendance Dashboard", layout="wide")
 
 
+def read_sql_df(conn, query):
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception:
+        cur = conn.cursor()
+        cur.execute(query)
+        cols = [d[0] for d in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+
+
 @st.cache_data(ttl=5)  # refresh cache every 5 seconds so new attendance shows up
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
-    attendance_df = pd.read_sql_query(
-        "SELECT student_id, name, timestamp, status FROM attendance ORDER BY timestamp DESC",
-        conn
+    conn = get_connection()
+    conn.sync()
+
+    attendance_df = read_sql_df(
+        conn,
+        "SELECT student_id, name, timestamp, status FROM attendance ORDER BY timestamp DESC"
     )
-    students_df = pd.read_sql_query(
-        "SELECT student_id, name, photo_path, registered_on FROM student_profiles",
-        conn
+    students_df = read_sql_df(
+        conn,
+        "SELECT student_id, name, photo_path, registered_on FROM student_profiles"
     )
     conn.close()
 

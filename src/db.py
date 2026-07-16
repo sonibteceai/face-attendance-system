@@ -1,16 +1,27 @@
-import sqlite3
-import os
+﻿import os
+import libsql
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TURSO_DATABASE_URL = os.environ["TURSO_DATABASE_URL"]
+TURSO_AUTH_TOKEN = os.environ["TURSO_AUTH_TOKEN"]
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "database", "attendance.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    return libsql.connect(
+        DB_PATH,
+        sync_url=TURSO_DATABASE_URL,
+        auth_token=TURSO_AUTH_TOKEN,
+    )
 
 def init_db():
     conn = get_connection()
+    conn.sync()
     cursor = conn.cursor()
 
-    # One row per student — profile info only
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS student_profiles (
             student_id TEXT PRIMARY KEY,
@@ -19,8 +30,6 @@ def init_db():
             registered_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
-    # Multiple rows per student — one per captured pose
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS face_embeddings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,7 +38,6 @@ def init_db():
             FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,8 +50,9 @@ def init_db():
     """)
 
     conn.commit()
+    conn.sync()
     conn.close()
-    print("Database initialized at:", DB_PATH)
+    print("Database initialized (Turso):", TURSO_DATABASE_URL)
 
 if __name__ == "__main__":
     init_db()
