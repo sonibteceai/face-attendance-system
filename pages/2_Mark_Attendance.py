@@ -5,17 +5,16 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 import streamlit as st
 import cv2
 import numpy as np
-import pickle
 import threading
 import av
 from insightface.app import FaceAnalysis
 from sklearn.metrics.pairwise import cosine_distances
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from db import get_connection
+from train_classifier import train_and_save, load_model_from_db
 
 st.set_page_config(page_title="Mark Attendance")
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "classifier.pkl")
 DISTANCE_THRESHOLD = 0.4
 
 
@@ -28,8 +27,9 @@ def load_face_app():
 
 @st.cache_resource
 def load_classifier():
-    with open(MODEL_PATH, "rb") as f:
-        saved = pickle.load(f)
+    saved = load_model_from_db()
+    if saved is None:
+        return None, None
     return saved["model"], saved["names"]
 
 
@@ -48,9 +48,37 @@ def load_training_data():
     return np.array(X), np.array(y)
 
 
-face_app = load_face_app()
+st.title("🎥 Live Attendance")
+
 model, names = load_classifier()
+
+if model is None:
+    st.warning(
+        "⚠️ No trained model found yet. Register at least 2 students on the "
+        "**Register Student** page, then click **Retrain Model Now** there before "
+        "marking attendance."
+    )
+    if st.button("🔁 Try Training Now"):
+        with st.spinner("Training classifier on all registered students..."):
+            try:
+                trained = train_and_save()
+                if trained:
+                    st.cache_resource.clear()
+                    st.success("✅ Model trained. Reloading page...")
+                    st.rerun()
+                else:
+                    st.error("❌ Training needs at least 2 registered students.")
+            except Exception as e:
+                st.error(f"❌ Training failed: {e}")
+    st.stop()
+
 TRAIN_X, TRAIN_Y = load_training_data()
+
+if len(TRAIN_X) == 0:
+    st.warning("⚠️ No face embeddings found in the database. Register students first.")
+    st.stop()
+
+face_app = load_face_app()
 
 
 def already_marked(student_id):
@@ -125,7 +153,6 @@ class AttendanceProcessor(VideoProcessorBase):
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
-st.title("🎥 Live Attendance")
 st.caption("Attendance is marked automatically, once per student per day.")
 
 _, center_col, _ = st.columns([1, 2, 1])
