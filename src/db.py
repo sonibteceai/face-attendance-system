@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+
+print("Loaded URL:", os.getenv("TURSO_DATABASE_URL"))
+print("Loaded Token:", os.getenv("TURSO_AUTH_TOKEN"))
+
 TURSO_DATABASE_URL = os.environ["TURSO_DATABASE_URL"]
 TURSO_AUTH_TOKEN = os.environ["TURSO_AUTH_TOKEN"]
 

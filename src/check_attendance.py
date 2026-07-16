@@ -2,6 +2,7 @@ from db import get_connection
 
 def check_attendance():
     conn = get_connection()
+    conn.sync()  # pull latest data from Turso before reading
     cursor = conn.cursor()
     cursor.execute("""
         SELECT student_id, name, timestamp, status 

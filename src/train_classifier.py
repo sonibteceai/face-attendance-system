@@ -19,7 +19,9 @@ MODEL_PATH = os.path.join(MODEL_DIR, "classifier.pkl")
 
 def load_embeddings():
     conn = get_connection()
+    conn.sync()  # pull latest data from Turso before reading
     cursor = conn.cursor()
+
     cursor.execute("SELECT student_id, embedding FROM face_embeddings")
     emb_rows = cursor.fetchall()
 

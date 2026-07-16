@@ -3,6 +3,7 @@ from db import get_connection
 
 def check_students():
     conn = get_connection()
+    conn.sync()  # pull latest data from Turso before reading
     cursor = conn.cursor()
     cursor.execute("""
         SELECT sp.student_id, sp.name, COUNT(fe.id) as sample_count
