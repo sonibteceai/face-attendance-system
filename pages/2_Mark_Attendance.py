@@ -14,6 +14,43 @@ from streamlit_webrtc import webrtc_streamer, RTCConfiguration
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "database", "attendance.db")
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "classifier.pkl")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+
+def _init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_profiles (
+            student_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            photo_path TEXT,
+            registered_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS face_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'Present',
+            FOREIGN KEY (student_id) REFERENCES student_profiles(student_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+_init_db()
 
 st.set_page_config(page_title="Mark Attendance", layout="wide")
 st.title("📸 Live Attendance")
