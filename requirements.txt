@@ -8,5 +8,3 @@ streamlit-webrtc
 av
 plotly
 pandas
-libsql
-python-dotenv
