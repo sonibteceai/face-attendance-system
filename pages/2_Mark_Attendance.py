@@ -55,6 +55,7 @@ TRAIN_X, TRAIN_Y = load_training_data()
 
 def already_marked(student_id):
     conn = get_connection()
+    conn.sync()  # pull latest data from Turso before checking
     cursor = conn.cursor()
     cursor.execute(
         "SELECT 1 FROM attendance WHERE student_id = ? AND DATE(timestamp) = DATE('now', 'localtime')",
@@ -73,6 +74,7 @@ def mark_attendance_db(student_id, name):
         (student_id, name),
     )
     conn.commit()
+    conn.sync()  # push/refresh local replica after write
     conn.close()
     print(f"📝 Attendance marked: {name} ({student_id})")
 

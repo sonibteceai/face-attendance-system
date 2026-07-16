@@ -10,6 +10,7 @@ import av
 from insightface.app import FaceAnalysis
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from db import get_connection
+from train_classifier import train_and_save
 
 st.set_page_config(page_title="Register Student")
 
@@ -81,6 +82,8 @@ if "samples" not in st.session_state:
     st.session_state.samples = []
 if "profile_photo_path" not in st.session_state:
     st.session_state.profile_photo_path = None
+if "just_registered" not in st.session_state:
+    st.session_state.just_registered = False
 
 _, center_col, _ = st.columns([1, 2, 1])
 with center_col:
@@ -151,6 +154,7 @@ if st.button("💾 Save Registration", disabled=save_disabled):
         st.success(f"✅ {name} registered successfully with {len(st.session_state.samples)} samples.")
         st.session_state.samples = []
         st.session_state.profile_photo_path = None
+        st.session_state.just_registered = True
     except Exception as e:
         if "constraint" in str(e).lower():
             st.error(f"❌ Student ID '{student_id}' already exists.")
@@ -158,3 +162,17 @@ if st.button("💾 Save Registration", disabled=save_disabled):
             st.error(f"❌ Registration failed: {e}")
     finally:
         conn.close()
+
+# Show retrain option right after a successful registration
+if st.session_state.just_registered:
+    st.divider()
+    st.info("New student data was added. Retrain the model so attendance recognizes them.")
+    if st.button("🔁 Retrain Model Now"):
+        with st.spinner("Retraining classifier on all registered students..."):
+            try:
+                train_and_save()
+                st.cache_resource.clear()  # so Mark Attendance page reloads the new model
+                st.success("✅ Model retrained successfully.")
+                st.session_state.just_registered = False
+            except Exception as e:
+                st.error(f"❌ Retraining failed: {e}")
