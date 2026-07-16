@@ -1,4 +1,3 @@
-opencv-python-headless
 insightface
 onnxruntime
 scikit-learn
@@ -10,3 +9,4 @@ plotly
 pandas
 libsql
 python-dotenv
+opencv-python-headless
